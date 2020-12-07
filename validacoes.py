@@ -244,15 +244,22 @@ def validar_cnpj_razao(df, col_reference='Consultado (CPF/CNPJ)', col_to_check='
                             erros.append('Certidão sem CPF/CNPJ, mas Nome/Razão social [ ' + nome_raz + ' ] pode pertencer ao CPF/CNPJ [ ' + cnpj + ' ]')
 
     return df, pd.DataFrame.from_dict({'Urls': urls, 'Mensagem': erros})
-                
-        
+
+
+def totaliza_np(row, skip, t, size):
+    soma=0
+    for i in range(skip+t-1, size, 3): soma += row[i]
+
+    return soma
+
+
 def gera_mapa_certidoes(df):
     cont = 0
     tipos = {}
     for n in (df['Classificação'].unique()):
         tipos[n] = cont
         cont += 1
-    print(tipos)    
+
     num_linhas = len(df[~df['Consultado (CPF/CNPJ)'].isna()]['Consultado (CPF/CNPJ)'].unique())
 
     resultados = ['Negativa', 'Positiva', 'Pos./Neg.']
@@ -280,7 +287,16 @@ def gera_mapa_certidoes(df):
         resu_cert = dfg_i[cont_lin][2]
 
         cert_dict[tipo_cert[0:4]+' '+resu_cert][cont_cnpj] = lin
-        
+
         cont_lin += 1
 
-    return pd.DataFrame.from_dict(cert_dict)    
+    mapdf = pd.DataFrame.from_dict(cert_dict) 
+    tam_mapdf = mapdf.shape[1]
+    
+    # Insere colunas totalizadoras
+    tipo = 1
+    for res in resultados:
+        mapdf['Total'+' '+res] = mapdf.apply(totaliza_np, args=[1, tipo, tam_mapdf], axis=1)
+        tipo += 1
+
+    return mapdf
