@@ -27,14 +27,16 @@ Parâmetros:
                df -> dataset que se deseja verificar duplicidades
               dfp -> dataset com as anotações positivas
     cols_to_group -> lista com as colunas que devem ser verificadas
-    col_to_report -> coluna que será informada no caso de duplicidae
+    col_to_report -> coluna que será informada no caso de duplicidade
 Retorno: dataframe com as linhas e mensagem
 '''
 def validar_duplicidade (df, dfp, cols_to_check=[], col_to_report='Url'):
     dupdf = df[df.duplicated(cols_to_check, keep=False)]
+
     str_procs = []
+    result_idx = dupdf.columns.tolist().index('Resultado') + 1
     for lin in dupdf.itertuples():
-        if lin[13] == 'Positiva':
+        if lin[result_idx] == 'Positiva':
             str_procs.append(monta_processos(dfp, lin[1]))
         else:
             str_procs.append('')
@@ -42,18 +44,23 @@ def validar_duplicidade (df, dfp, cols_to_check=[], col_to_report='Url'):
     dupdf.insert(loc=dupdf.shape[1],column='Processos', value=str_procs ,allow_duplicates=True)
     cols_to_check2 = cols_to_check.copy()
     cols_to_check2.append('Processos')
-    dup_w_process = dupdf[dupdf.duplicated(subset=cols_to_check2)]
-
-    report_idx = df.columns.to_list().index(col_to_report) + 1
+    dup_w_process = dupdf.groupby(cols_to_check2, dropna=False)[col_to_report].apply(np.array).reset_index(name=col_to_report)
 
     urls = []
     erros = []
+    grupos = []
+    grupo = 0
 
     for line in dup_w_process.itertuples():
-        urls.append(line[report_idx])
-        erros.append('Possível certidão duplicada')
+        if (len(line[len(cols_to_check2)+1])) > 1:
+            for dupurl in line[len(cols_to_check2)+1]:
+                grupos.append(grupo)
+                urls.append(dupurl)
+                erros.append('Possível certidão duplicada')
+                
+            grupo += 1
 
-    return pd.DataFrame.from_dict({'Urls': urls, 'Mensagem': erros})
+    return pd.DataFrame.from_dict({'Grupo': grupos, 'Url': urls, 'Mensagem': erros})
 
 
 def valida_data(data, format='%d/%m/%Y'):
@@ -168,7 +175,12 @@ def checar_validade (df, col_to_validate='Validade', col_issued='Emitido em', co
     return pd.DataFrame.from_dict({'Urls': urls, 'Mensagem': erros})
 
 
+def mask(df, key, value):
+    return df[df[key] == value]
+
+
 def validar_cnpj_razao(df, col_reference='Consultado (CPF/CNPJ)', col_to_check='Consultado (Nome)', col_to_report='Url', threshold=60):
+
     urls = []
     erros = []
 
@@ -183,12 +195,14 @@ def validar_cnpj_razao(df, col_reference='Consultado (CPF/CNPJ)', col_to_check='
     razao_atual = ''
     primeiro = True
     for lin in dfs.itertuples():
+        nome_raz = lin[col_che_idx]
+
         if (lin[col_ref_idx] != '') and (not pd.isna(lin[col_ref_idx])): # Somente se o cnpj contiver alguma coisa
-            
+
             if primeiro:
                 if lin[col_ref_idx].strip() != cnpj_atual:
                     cnpj_atual = lin[col_ref_idx].strip()
-                    razao_atual = lin[col_che_idx]
+                    razao_atual = nome_raz
                     primeiro = False
                     continue
                 else:
@@ -196,33 +210,54 @@ def validar_cnpj_razao(df, col_reference='Consultado (CPF/CNPJ)', col_to_check='
             else:
                 if lin[col_ref_idx].strip() != cnpj_atual:
                     cnpj_atual = lin[col_ref_idx].strip()
-                    razao_atual = lin[col_che_idx]
+                    razao_atual = nome_raz
                     primeiro = True
                     continue
-                    
-            perc_similar = fuzz.token_sort_ratio(lin[col_che_idx], razao_atual)
-            if perc_similar < threshold:
-                urls.append(lin[col_rep_idx])
-                if (pd.isna(lin[col_che_idx])):
-                    erros.append('Razão Social inconsistente: Encontrado [ Nan ] Esperado ['+razao_atual+']')
-                else:
-                    erros.append('Razão Social inconsistente: Encontrado ['+lin[col_che_idx]+'] Esperado ['+razao_atual+']')
 
-    return pd.DataFrame.from_dict({'Urls': urls, 'Mensagem': erros})
+            if (pd.isna(nome_raz)): # Tem CPF/CNPJ mas não tem Nome/Razao = OK 
+                continue
+
+            perc_similar = fuzz.token_sort_ratio(nome_raz, razao_atual)
+            if (perc_similar < threshold): # A razao é bastante diferente
+                urls.append(lin[col_rep_idx])
+                erros.append('Razão Social inconsistente: Encontrado [ '+lin[col_che_idx]+' ] Esperado [ '+razao_atual+' ]')
+        else: # CPF/CNPJ nulo ou vazio
+            if (pd.isna(nome_raz)): # Não possui razão social/nome também = ERRO
+                urls.append(lin[col_rep_idx])
+                erros.append('Certidão sem CPF/CNPJ e sem Nome/Razão Social')
+            else: # Não tem CPF/CNPJ mas possui razao social/nome
+                num_cnpjs = df.loc[lambda x: x[col_to_check] == nome_raz][col_reference].unique()
+                if (len(num_cnpjs) == 1): # Com Nome/Razão mas o único CPF/CNPJ é nulo = ERRO
+                    urls.append(lin[col_rep_idx])
+                    erros.append('Nome/Razão Social sem CPF/CNPJ identificado [ ' + nome_raz + ' ]')
+                elif (len(num_cnpjs) == 2): # Um dos cnpjs é nulo. Devemos checar o outro e atualizar o df
+                    cnpj_tmp = num_cnpjs[1] if (pd.isna(num_cnpjs[0])) else num_cnpjs[0]
+                    # atualiza o CPF/CNPJ quando há apenas um CPF/CNPJ, com a mesma razao social, que não é nulo
+                    for index, row in df.loc[lambda x: x[col_to_check] == nome_raz].iterrows():
+                        urls.append(row[col_rep_idx-1])
+                        erros.append('Certidão sem CPF/CNPJ, porém identificável e atualizado para [ ' + cnpj_tmp+ ' ]')
+                        df.loc[index, col_reference] = cnpj_tmp
+                else:  # Mais que dois Nomes/CNPJs é um problema = ERRO. Mostra os CPFs/CNPJs possíveis
+                    for cnpj in num_cnpjs:
+                        if (not pd.isna(cnpj)):
+                            urls.append(lin[col_rep_idx])
+                            erros.append('Certidão sem CPF/CNPJ, mas Nome/Razão social [ ' + nome_raz + ' ] pode pertencer ao CPF/CNPJ [ ' + cnpj + ' ]')
+
+    return df, pd.DataFrame.from_dict({'Urls': urls, 'Mensagem': erros})
                 
         
 def gera_mapa_certidoes(df):
     cont = 0
     tipos = {}
-    for n in (df['Tipo de Certidão'].unique()):
+    for n in (df['Classificação'].unique()):
         tipos[n] = cont
         cont += 1
-        
+    print(tipos)    
     num_linhas = len(df[~df['Consultado (CPF/CNPJ)'].isna()]['Consultado (CPF/CNPJ)'].unique())
 
     resultados = ['Negativa', 'Positiva', 'Pos./Neg.']
 
-    dfg = df[~df['Consultado (CPF/CNPJ)'].isna()].groupby(['Consultado (CPF/CNPJ)', 'Tipo de Certidão', 'Resultado']).count()['Url']
+    dfg = df[~df['Consultado (CPF/CNPJ)'].isna()].groupby(['Consultado (CPF/CNPJ)', 'Classificação', 'Resultado']).count()['Url']
     dfg_i = dfg.index
 
     cont_cnpj = -1
@@ -233,7 +268,7 @@ def gera_mapa_certidoes(df):
 
     for tipo in tipos:
         for res in resultados:
-            cert_dict[tipo+' '+res] = np.zeros(num_linhas,  dtype=int)
+            cert_dict[tipo[0:4]+' '+res] = np.zeros(num_linhas,  dtype=int)
 
     for lin in dfg:
         if (cnpj_atual != dfg_i[cont_lin][0]):
@@ -244,7 +279,7 @@ def gera_mapa_certidoes(df):
         tipo_cert = dfg_i[cont_lin][1]
         resu_cert = dfg_i[cont_lin][2]
 
-        cert_dict[tipo_cert+' '+resu_cert][cont_cnpj] = lin
+        cert_dict[tipo_cert[0:4]+' '+resu_cert][cont_cnpj] = lin
         
         cont_lin += 1
 
