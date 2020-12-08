@@ -227,9 +227,11 @@ def validar_cnpj_razao(df, col_reference='Consultado (CPF/CNPJ)', col_to_check='
                 erros.append('Certidão sem CPF/CNPJ e sem Nome/Razão Social')
             else: # Não tem CPF/CNPJ mas possui razao social/nome
                 num_cnpjs = df.loc[lambda x: x[col_to_check] == nome_raz][col_reference].unique()
-                if (len(num_cnpjs) == 1): # Com Nome/Razão mas o único CPF/CNPJ é nulo = ERRO
-                    urls.append(lin[col_rep_idx])
-                    erros.append('Nome/Razão Social sem CPF/CNPJ identificado [ ' + nome_raz + ' ]')
+                if (len(num_cnpjs) == 1): 
+                    if (pd.isna(num_cnpjs)): # Com Nome/Razão mas o único CPF/CNPJ é nulo = ERRO
+                        print(num_cnpjs)
+                        urls.append(lin[col_rep_idx])
+                        erros.append('Nome/Razão Social sem CPF/CNPJ identificado [ ' + nome_raz + ' ]')
                 elif (len(num_cnpjs) == 2): # Um dos cnpjs é nulo. Devemos checar o outro e atualizar o df
                     cnpj_tmp = num_cnpjs[1] if (pd.isna(num_cnpjs[0])) else num_cnpjs[0]
                     # atualiza o CPF/CNPJ quando há apenas um CPF/CNPJ, com a mesma razao social, que não é nulo
