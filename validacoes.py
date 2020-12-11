@@ -8,7 +8,14 @@ from dateutil.relativedelta import relativedelta
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
 
-
+'''
+Funcao: monta_processos
+Finalidade: Obter todos os processos de uma certidão positiva, montando uma string com eles
+Parâmetros: 
+              dfp -> dataset com as anotações positivas
+             nome -> Nome do arquivo da certidão
+Retorno: string com os números dos processos encontrados
+'''
 def monta_processos(dfp, nome):
     procs = dfp[dfp['Nome'] == nome].sort_values('Número do Processo')
     str_procs = ''
@@ -22,13 +29,12 @@ def monta_processos(dfp, nome):
 Funcao: validar_duplicidade
 Finalidade: Verificar se existem linhas duplicadas em um dataset, considerando-se um conjunto de features,
             bem como os processos, em caso de certidão positiva
-            
 Parâmetros: 
                df -> dataset que se deseja verificar duplicidades
               dfp -> dataset com as anotações positivas
     cols_to_group -> lista com as colunas que devem ser verificadas
-    col_to_report -> coluna que será informada no caso de duplicidade
-Retorno: dataframe com as linhas e mensagem
+    col_to_report -> coluna que será informada no caso de erro
+Retorno: dataframe com as linhas e mensagens de erro
 '''
 def validar_duplicidade (df, dfp, cols_to_check=[], col_to_report='Url'):
     dupdf = df[df.duplicated(cols_to_check, keep=False)]
@@ -63,6 +69,14 @@ def validar_duplicidade (df, dfp, cols_to_check=[], col_to_report='Url'):
     return pd.DataFrame.from_dict({'Grupo': grupos, 'Url': urls, 'Mensagem': erros})
 
 
+'''
+Funcao: valida_data
+Finalidade: Verifica se uma string possui uma data válida, de acordo com um formato
+Parâmetros: 
+             data -> String com a data
+           format -> O formato em que a data deveria estar
+Retorno: se a data for válida, retorna ela, caso contrário retorna ''
+'''
 def valida_data(data, format='%d/%m/%Y'):
     try:
         date = datetime.strptime(data, format).date()
@@ -72,6 +86,16 @@ def valida_data(data, format='%d/%m/%Y'):
     return date
 
 
+'''
+Funcao: validar_datas
+Finalidade: Verificar se colunas de datas de um dataframe estão corretas
+Parâmetros: 
+               df -> dataset que se deseja verificar as colunas
+        cols_date -> lista com as colunas a serem verificadas
+           format -> O formato em que as datas deveriam estar
+    col_to_report -> coluna que será informada no caso de erro
+Retorno: dataframe com as linhas e mensagens de erro
+'''
 def validar_datas (df, cols_date=[], format='%d/%m/%Y', col_to_report='Url'):
     urls = []
     erros = []
@@ -90,6 +114,19 @@ def validar_datas (df, cols_date=[], format='%d/%m/%Y', col_to_report='Url'):
     return pd.DataFrame.from_dict({'Urls': urls, 'Mensagem': erros})
 
 
+'''
+Funcao: checar_validade
+Finalidade: Checar a validade de uma certidão, a partir da data de sua emissão, em uma certa data
+            Obs: A coluna de validade pode estar em dias, meses ou datas, ou ainda ser nula
+Parâmetros: 
+               df -> dataset que se deseja verificar as validades
+  col_to_validate -> coluna com a validade obtida pela automação
+      cols_issued -> coluna com a data de emissão
+    col_to_report -> coluna que será informada no caso de erro
+    is_null_error -> Flag que informa se as validades nulas serão consideradas erradas ou não
+       limit_date -> Data contra a qual a validade será verificada
+Retorno: dataframe com as linhas e mensagens de erro
+'''
 def checar_validade (df, col_to_validate='Validade', col_issued='Emitido em', col_to_report='Url', is_null_error=True, limit_date=''):
     urls = []
     erros = []
@@ -175,10 +212,16 @@ def checar_validade (df, col_to_validate='Validade', col_issued='Emitido em', co
     return pd.DataFrame.from_dict({'Urls': urls, 'Mensagem': erros})
 
 
-def mask(df, key, value):
-    return df[df[key] == value]
-
-
+'''
+Funcao: validar_cnpj_razao
+Finalidade: Verificar se os nomes/razões sociais das certidões estão de acordo com os CPF/CNPJs
+Parâmetros: 
+               df -> dataset que se deseja verificar 
+    col_reference -> Coluna que será usada como base
+    cols_to_check -> Coluna que desejamos checar a consistência com a coluna de referência
+    col_to_report -> coluna que será informada no caso de erro
+Retorno: dataframe com as linhas e mensagem
+'''
 def validar_cnpj_razao(df, col_reference='Consultado (CPF/CNPJ)', col_to_check='Consultado (Nome)', col_to_report='Url', threshold=60):
 
     urls = []
@@ -229,9 +272,8 @@ def validar_cnpj_razao(df, col_reference='Consultado (CPF/CNPJ)', col_to_check='
                 num_cnpjs = df.loc[lambda x: x[col_to_check] == nome_raz][col_reference].unique()
                 if (len(num_cnpjs) == 1): 
                     if (pd.isna(num_cnpjs)): # Com Nome/Razão mas o único CPF/CNPJ é nulo = ERRO
-                        print(num_cnpjs)
                         urls.append(lin[col_rep_idx])
-                        erros.append('Nome/Razão Social sem CPF/CNPJ identificado [ ' + nome_raz + ' ]')
+                        erros.append('Certidão com Nome/Razão Social, mas sem CPF/CNPJ identificável [ ' + nome_raz + ' ]')
                 elif (len(num_cnpjs) == 2): # Um dos cnpjs é nulo. Devemos checar o outro e atualizar o df
                     cnpj_tmp = num_cnpjs[1] if (pd.isna(num_cnpjs[0])) else num_cnpjs[0]
                     # atualiza o CPF/CNPJ quando há apenas um CPF/CNPJ, com a mesma razao social, que não é nulo
