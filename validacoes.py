@@ -624,7 +624,7 @@ Resultado      Valor da máscara     Cor
 '''
 def mask_map(data, label_x, totais=True, total_qt=3):
     if totais:
-        inicio_total = len(label_x) - total_qt
+        inicio_total = len(label_x) - total_qt 
     else:
         inicio_total = len(label_x)
 
@@ -743,6 +743,8 @@ def gera_mapa_certidoes(df,
     CLASS = 'Classificação'
     RESULT = 'Resultado'
     CLASS_RES = 'classif_result'
+    MAX_DIM = 65536
+    DPI = 100
 
     data = df[[CNPJ, CLASS, RESULT]][df[RESULT].isin(show_result)]
     data[CLASS_RES] = data.apply(classif_result, axis=1)
@@ -752,21 +754,52 @@ def gera_mapa_certidoes(df,
     colunas = data.columns.tolist()
     
     # Insere colunas totalizadoras, se for o caso
+    col_totais = []
     if totais:
         for res in show_result: #RESULTADOS:
             data['Tot '+RESULTADOS[res]] = data.apply(totaliza_np, args=[0, RESULTADOS[res], colunas], axis=1)
+            col_totais.append('Tot '+RESULTADOS[res])
 
+    data['Tot P2'] = data.apply(totaliza_np, args=[0, 'P', colunas], axis=1)
+
+    data = data.sort_values(by='Tot P2')
     label_y = np.array(data.index.tolist())
     label_x = data.columns.values.tolist()
+    label_x.remove('Tot P2')
 
     inicio_total = (len(label_x) - len(show_result)) if totais else (len(label_x))
 
-    mask = mask_map(data, label_x, totais, len(show_result))
+    mask = mask_map(data[label_x], label_x, totais, len(show_result))
 
     # Obtem o novo colormap
     newcmp = cria_colormap(totais=totais)
 
-    fig, ax = plt.subplots(figsize = (22, 22), facecolor='w')
+    xmin,xmax = 0, len(label_x)
+    ymin,ymax = 0, len(label_y)
+
+    yox = (ymax-ymin)/(xmax-xmin)
+
+    # set number that should spans cell's width
+    pwidth = (int((len(label_x)+1)/3.0))    # inches
+    
+    if yox>1.0:
+        # tall figure
+        if pwidth * yox * DPI > MAX_DIM:
+            pwidth = int(MAX_DIM/(yox*DPI))
+
+        width, height = pwidth, pwidth*yox
+    elif yox==1.0:
+        width, height = pwidth, pwidth
+    elif yox<1.0:
+        # wide figure
+        width, height = pwidth*yox, pwidth
+        if width<pwidth:
+            height = height/width*pwidth
+            width = pwidth
+    else:
+        return
+
+    fig, ax = plt.subplots(figsize = (width, height), facecolor='w')
 
     vmax = 60 if totais else 30
     ax.imshow(mask, cmap=newcmp, norm=colors.Normalize(vmin=0, vmax=vmax)) 
@@ -782,11 +815,11 @@ def gera_mapa_certidoes(df,
     # rótulos na parte superior e inferior para melhor legibilidade
     ax.tick_params(axis="x", bottom=True, top=True, labelbottom=True, labeltop=True) 
 
-    plt.title('Mapa de Certidões Folder [ '+str(folder)+' ]')
+    plt.title('Mapa do Histórico de Certidões Folder [ '+str(folder)+' ]')
 
     # Coloca o texto nas células, que é a quantidade de cada tipo de certidão x cnpj
     for i in range(data.shape[0]):
-        for j in range(data.shape[1]):
+        for j in range(data.shape[1] - 1):
             cell = data.iloc[i, j]
             if (j < inicio_total): # preenche as células de valores
                 if cell > 0: # somente se houver uma ou mais certidões
@@ -798,8 +831,8 @@ def gera_mapa_certidoes(df,
 
     if save:
         timestr = time.strftime("%Y%m%d-%H%M%S")
-        save_to = path + 'Mapa de Certidões Folder [ ' + folder + ' ] - ' + timestr + '.jpg'
-        plt.savefig(save_to, dpi=150)
+        save_to = path + 'Mapa do Histórico de Certidões Folder [ ' + folder + ' ] - ' + timestr + '.jpg'
+        plt.savefig(save_to, dpi=DPI)
 
     return data
 
@@ -809,6 +842,8 @@ def gera_sheet_certidoes(df,
                         save=True, 
                         path=''):
 
+    MAX_DIM = 65536
+    DPI = 100
 
     df2 = df[['Consultado (CPF/CNPJ)', 'Classificação', 'Resultado', 'Emitido em']].copy()
     df2['class_short'] = df2['Classificação'].apply(lambda x: x[0:4])
@@ -823,7 +858,32 @@ def gera_sheet_certidoes(df,
 
     newcmp = cria_colormap(totais=False)
 
-    fig, ax = plt.subplots(figsize = (22, 22), facecolor='w')
+    xmin,xmax = 0, len(label_x)
+    ymin,ymax = 0, len(label_y)
+
+    yox = (ymax-ymin)/(xmax-xmin)
+
+    # set number that should spans cell's width
+    pwidth = (int((len(label_x)+1)/3.0))    # inches
+
+    if yox>1.0:
+        # tall figure
+        if pwidth * yox * DPI > MAX_DIM:
+            pwidth = int(MAX_DIM/(yox*DPI))
+
+        width, height = pwidth, pwidth*yox
+    elif yox==1.0:
+        width, height = pwidth, pwidth
+    elif yox<1.0:
+        # wide figure
+        width, height = pwidth*yox, pwidth
+        if width<pwidth:
+            height = height/width*pwidth
+            width = pwidth
+    else:
+        return
+
+    fig, ax = plt.subplots(figsize = (width, height), facecolor='w')
 
     ax.imshow(mask, cmap=newcmp, norm=colors.Normalize(vmin=0, vmax=30)) 
 
@@ -838,14 +898,72 @@ def gera_sheet_certidoes(df,
     # rótulos na parte superior e inferior para melhor legibilidade
     ax.tick_params(axis="x", bottom=True, top=True, labelbottom=True, labeltop=True) 
 
-    plt.title('Mapa de Certidões Folder [ '+str(folder)+' ]')
+    plt.title('Mapa das Últimas Certidões Folder [ '+folder+' ]')
 
     fig.show()
 
     if save:
         timestr = time.strftime("%Y%m%d-%H%M%S")
-        save_to = path + 'Sheet de Certidões Folder [ ' + folder + ' ] - ' + timestr + '.jpg'
-        plt.savefig(save_to, dpi=150)
+        save_to = path + 'Mapa das Últimas Certidões Folder [ ' + folder + ' ] - ' + timestr + '.jpg'
+        plt.savefig(save_to, dpi=100)
+
+    return df2
+
+def gera_sheet_certidoesT(df, 
+                        folder='',
+                        save=True, 
+                        path=''):
+
+    MAX_DIM = 65536
+    DPI = 100
+
+    df2 = df[['Consultado (CPF/CNPJ)', 'Classificação', 'Resultado', 'Emitido em']].copy()
+    df2['class_short'] = df2['Classificação'].apply(lambda x: x[0:4])
+    df2 = df2[['Consultado (CPF/CNPJ)', 'Resultado', 'class_short']].groupby(by=['Consultado (CPF/CNPJ)', 'class_short']).max('Emitido em').reset_index()
+    df2 = df2.pivot(index='Consultado (CPF/CNPJ)', columns='class_short', values='Resultado').reset_index().set_index('Consultado (CPF/CNPJ)')
+    df2.fillna('', inplace=True)
+
+    label_y = np.array(df2.index.tolist())
+    label_x = df2.columns.values.tolist()
+
+    mask = mask_map(df2, label_x, totais=False, total_qt=3)
+
+    newcmp = cria_colormap(totais=False)
+
+    xmin,xmax = 0, len(label_y)
+    ymin,ymax = 0, len(label_x)
+
+    yox = (ymax-ymin)/(xmax-xmin)
+
+    # set number that should spans cell's width
+    pwidth = (int((len(label_y)+1)/3.0))    # inches
+
+    width = pwidth
+    height = pwidth * yox + 3
+
+    fig, ax = plt.subplots(figsize = (width, height), facecolor='w')
+
+    ax.imshow(mask.transpose(), cmap=newcmp, norm=colors.Normalize(vmin=0, vmax=30)) 
+
+    # Exibe todos os ticks dos eixos x e y
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1)) 
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1)) 
+
+    # Exibe os rótulos nos eixos x e y
+    plt.xticks(range(len(label_y)), label_y, rotation='vertical') 
+    plt.yticks(range(len(label_x)), label_x) 
+
+    # rótulos na parte superior e inferior para melhor legibilidade
+    ax.tick_params(axis="x", bottom=True, top=False, labelbottom=True, labeltop=False) 
+
+    plt.title('Mapa das Últimas Certidões Folder [ '+folder+' ]')
+
+    fig.show()
+
+    if save:
+        timestr = time.strftime("%Y%m%d-%H%M%S")
+        save_to = path + 'Mapa das Últimas Certidões Folder [ ' + folder + ' ] - ' + timestr + '.jpg'
+        plt.savefig(save_to, dpi=100)
 
     return df2
 
@@ -871,6 +989,9 @@ def suppliers_score(df,
                     save=True, 
                     path=''):
 
+    MAX_DIM = 65536
+    DPI = 100
+
     df2 = df[['Consultado (CPF/CNPJ)', 'Classificação', 'Resultado', 'Emitido em']].copy()
     df2['class_short'] = df2['Classificação'].apply(lambda x: x[0:4])
     df2 = df2[['Consultado (CPF/CNPJ)', 'Resultado', 'class_short']].groupby(by=['Consultado (CPF/CNPJ)', 'class_short']).max('Emitido em').reset_index()
@@ -893,34 +1014,53 @@ def suppliers_score(df,
         score = get_supplier_score(row[1:], sp_sc_dict, columns)
         df2.loc[row[0], 'score'] = score
 
+#    df2 = df2.sort_values(by='score')
     max_score = df2.score.max()
     score_good = max_score*0.3
     score_bad = max_score*0.7
 
     labels_x = df2.index.values
 
-    size_x = int(len(labels_x)/3.0)+1
-    size_y = int(max_score/3.0)+1
-
-    fig, ax = plt.subplots(figsize = (size_y, size_x), facecolor='w')
-
     colors = df2.score.apply(lambda x: 'red' if x > score_bad else 'green' if x <= score_good else 'yellow').tolist()
 
-    ax.tick_params(axis="x", bottom=True, top=True, labelbottom=True, labeltop=True) 
+    xmin,xmax = 0, int(max_score) + 1
+    ymin,ymax = 0, len(labels_x)
 
+    yox = (ymax-ymin)/(xmax-xmin)
+
+    width = max_score/5.0 + 3
+    if width < 2:
+        width = 2
+
+    if (width * DPI) > MAX_DIM:
+        width = int(MAX_DIM/DPI)
+
+    height = width * yox
+    if height < 2:
+        height = 2
+
+    if (height * DPI) > MAX_DIM:
+        height = int(MAX_DIM/DPI)
+        width = height / yox
+
+    fig, ax = plt.subplots(facecolor='w', figsize = (width, height))
     plt.title('Pontuação de Fornecedores [ '+str(folder)+' ]')
     plt.scatter(df2.score, labels_x, c=colors, s=200)
-
+#    plt.xticks(range(len(labels_x)), labels_x, rotation='vertical')     
     plt.grid(b=True, which='major', color='#666666', linestyle='-')
+
+    ticker.Locator.MAXTICKS = 3000
     plt.minorticks_on()
     plt.grid(b=True, which='minor', color='#999999', linestyle='--', alpha=0.2, axis='x')
+
+#    ax.tick_params(axis="x", bottom=True, top=True, labelbottom=True, labeltop=True) 
 
     fig.show()
 
     if save:
         timestr = time.strftime("%Y%m%d-%H%M%S")
         save_to = path + 'Pontuação de Fornecedores [ ' + folder + ' ] - ' + timestr + '.jpg'
-        plt.savefig(save_to, dpi=150)
+        plt.savefig(save_to, dpi=100)
 
     return df2
 
